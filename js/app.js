@@ -100,17 +100,38 @@ const RUN = {
 };
 
 // ---- Tampilan ----
+const IC = { file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M10 9H8M16 13H8M16 17H8"/>',
+  fileup: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M12 12v6M15 15l-3-3-3 3"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+  login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>', logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>', arrow: '<path d="M5 12h14M12 5l7 7-7 7"/>',
+  layers: '<path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65M22 12.65l-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>',
+  minimize: '<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>', pen: '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>',
+  spark: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.29 1.29L3 12l5.8 1.9a2 2 0 0 1 1.29 1.29L12 21l1.9-5.8a2 2 0 0 1 1.29-1.29L21 12l-5.8-1.9a2 2 0 0 1-1.29-1.29z"/>',
+  cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9z"/>', monitor: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/>' };
+const ico = n => `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${IC[n]}</svg>`;
+const CI = ['layers', 'minimize', 'file', 'image', 'pen', 'lock', 'spark'];
 function renderTop() {
-  $('#top').innerHTML = `<a class="logo" href="#/"><b>P</b> PDF CONVERTER</a><nav><a href="#/">Semua Tools</a><a href="#/riwayat">Riwayat</a>${S.user && S.user.peran === 'admin' ? '<a href="#/admin">Admin</a>' : ''}</nav>
-  <div class="who"><span class="chip">${S.user ? esc(S.user.nama) + ' · ' + maxMB() + ' MB' : 'Tamu · maks ' + maxMB() + ' MB'}</span>
-  ${S.user ? '<button id="out" class="btn o">Keluar</button>' : '<a class="btn" href="#/masuk">Masuk</a>'}</div>`;
+  const h0 = location.hash.replace(/^#\/?/, '').split('/')[0], adm = S.user && S.user.peran === 'admin';
+  const nv = (href, ic, lb, on) => `<a href="${href}"${on ? ' aria-current="page"' : ''}>${ico(ic)}<span>${lb}</span></a>`;
+  $('#side').innerHTML = `<a class="logo" href="#/"><b>${ico('file')}</b><span>PDF Converter<small>Semua tools PDF</small></span></a>
+  <nav aria-label="Navigasi utama">${nv('#/', 'grid', 'Semua Tools', h0 === '' || h0 === 'tool')}${nv('#/riwayat', 'clock', 'Riwayat', h0 === 'riwayat')}${adm ? nv('#/admin', 'shield', 'Dashboard Admin', h0 === 'admin') : ''}${S.user ? `<button id="out">${ico('logout')}<span>Keluar</span></button>` : nv('#/masuk', 'login', 'Masuk', h0 === 'masuk' || h0 === 'daftar')}</nav>
+  <div class="promo">${ico('lock')}<b>Privasi terjaga</b><span>File diproses di perangkat Anda dan tidak diunggah.</span></div>`;
+  $('#top').innerHTML = `<div><h2>PDF Converter</h2><p>Semua tools PDF, langsung di browser</p></div><div class="who"><span class="chip">${S.user ? esc(S.user.nama) + ' · ' + maxMB() + ' MB' : 'Tamu · maks ' + maxMB() + ' MB'}</span>${S.user ? `<span class="av" aria-hidden="true">${esc(S.user.nama.charAt(0).toUpperCase())}</span>` : ''}</div>`;
   const o = $('#out'); if (o) o.onclick = () => { api('logout'); setAuth('', null); location.hash = '#/'; };
 }
-const card = t => { const r = READY.has(t[1]); return `<a class="card ${r ? '' : 'off'}" ${r ? `href="#/tool/${t[1]}"` : 'aria-disabled="true"'}><span class="badge">${r ? (CLOUD.has(t[1]) ? 'Cloud' : 'Browser') : 'Segera hadir'}</span><h3>${t[2]}</h3><p>${t[3]}</p></a>`; };
+const card = t => { const r = READY.has(t[1]), c = CLOUD.has(t[1]); return `<a class="card t${t[0] % 4}${r ? '' : ' off'}" ${r ? `href="#/tool/${t[1]}"` : 'aria-disabled="true"'}><span class="ic">${ico(CI[t[0]])}</span><div><h3>${t[2]}</h3><p>${t[3]}</p></div><span class="badge${c ? ' cl' : ''}">${r ? (c ? 'Cloud' : 'Browser') : 'Segera hadir'}</span></a>`; };
 function home() {
-  app.innerHTML = `<section class="hero"><h1>Semua tools PDF dalam satu tempat</h1><p>Proses langsung di browser Anda. File tidak diunggah.</p>
-  <label class="sr" for="q">Cari tool</label><input id="q" type="search" placeholder="Cari tool, mis. Gabung PDF"></section><div id="cats"></div>`;
-  const draw = q => { $('#cats').innerHTML = CATS.map((c, i) => { const l = T.filter(t => t[0] === i && (t[2] + t[3]).toLowerCase().includes(q)); return l.length ? `<section class="cat"><h2>${c} <span class="mut">(${l.length})</span></h2><div class="cards">${l.map(card).join('')}</div></section>` : ''; }).join('') || '<p>Tool tidak ditemukan.</p>'; };
+  const qa = [['merge', 'Gabung PDF', 'Satukan beberapa file', 'layers', 0], ['compress', 'Kompres PDF', 'Perkecil ukuran file', 'minimize', 1], ['word2pdf', 'Word ke PDF', 'Konversi dokumen', 'file', 2], ['pdf2jpg', 'PDF ke JPG', 'Halaman jadi gambar', 'image', 3]];
+  const st = [['grid', READY.size, 'Tool tersedia', 0], ['monitor', READY.size - CLOUD.size, 'Berjalan di browser', 1], ['cloud', CLOUD.size, 'Via Google (perlu login)', 2], ['shield', maxMB() + ' MB', 'Batas per file', 3]];
+  app.innerHTML = `<section class="banner"><div><h1>Selamat datang di PDF Converter</h1><p>Gabung, pisah, kompres, dan ubah PDF dalam hitungan detik. File Anda diproses di perangkat sendiri.</p><a class="btn w" href="#/tool/merge">Mulai Gabung PDF ${ico('arrow')}</a></div><div class="stack" aria-hidden="true"><i></i><i></i><i></i></div></section>
+  <section class="qa" aria-label="Tool populer">${qa.map(q => `<a class="t${q[4]}" href="#/tool/${q[0]}"><span class="i">${ico(q[3])}</span><b>${q[1]}</b><span class="mut">${q[2]}</span><span class="go">Buka ${ico('arrow')}</span></a>`).join('')}</section>
+  <section class="stats" aria-label="Ringkasan">${st.map(x => `<div class="st t${x[3]}"><span class="ic">${ico(x[0])}</span><div><b>${x[1]}</b><span class="mut">${x[2]}</span></div></div>`).join('')}</section>
+  <div class="srch">${ico('search')}<label class="sr" for="q">Cari tool</label><input id="q" type="search" placeholder="Cari tool, mis. Gabung PDF"></div><div id="cats"></div>`;
+  const draw = q => { $('#cats').innerHTML = CATS.map((c, i) => { const l = T.filter(t => t[0] === i && (t[2] + t[3]).toLowerCase().includes(q)); return l.length ? `<section class="cat"><h2><span class="ic t${i % 4}">${ico(CI[i])}</span>${c} <span class="mut">(${l.length})</span></h2><div class="cards">${l.map(card).join('')}</div></section>` : ''; }).join('') || '<p>Tool tidak ditemukan.</p>'; };
   draw(''); $('#q').oninput = e => draw(e.target.value.toLowerCase());
 }
 const OPTS = {
@@ -140,7 +161,7 @@ function tool(id) {
     if (ty === 'f') return L + `<input id="${i}" type="file" accept="${x}" data-req>`;
     return L + `<input id="${i}" type="${ty === 'n' ? 'number' : ty === 'p' ? 'password' : 'text'}" ${ty === 'n' ? `value="${x}" step="any"` : `placeholder="${esc(x)}"`} data-req>`; };
   app.innerHTML = `<nav class="crumb"><a href="#/">Beranda</a> / ${CATS[t[0]]} / <b>${t[2]}</b></nav><h1>${t[2]} <span class="badge">${CLOUD.has(id) ? 'Cloud' : 'Browser'}</span></h1><p>${t[3]}. Maks ${lim()} MB per file.${NOTE[id] ? ' <span class="mut">' + NOTE[id] + '</span>' : ''}</p>
-  <div class="grid2"><div><label class="drop" id="drop" tabindex="0"><input id="fi" type="file" accept="${acc}" ${multi ? 'multiple' : ''} hidden><b>Seret &amp; lepas berkas ke sini</b><span>atau klik untuk memilih</span></label><ul id="fl" class="fl"></ul></div>
+  <div class="grid2"><div><label class="drop" id="drop" tabindex="0"><input id="fi" type="file" accept="${acc}" ${multi ? 'multiple' : ''} hidden>${ico('fileup')}<b>Seret &amp; lepas berkas ke sini</b><span>atau klik untuk memilih</span></label><ul id="fl" class="fl"></ul></div>
   <aside class="panel"><h2>Opsi</h2>${(OPTS[id] || []).map(fld).join('') || `<p class="mut">${multi ? 'Urutan mengikuti daftar berkas.' : 'Tidak ada opsi tambahan.'}</p>`}
   <button id="go" class="btn" disabled>Proses</button><div id="res" aria-live="polite"></div></aside></div>`;
   let files = [];
@@ -197,7 +218,7 @@ async function admin() {
   const [s, u] = await Promise.all([api('adminStats'), api('adminUsers')]);
   if (!s.success) { if (/sesi/i.test(s.message)) { setAuth('', null); location.hash = '#/masuk'; return; } $('#a').textContent = s.message; return; }
   const d = s.data, ok = d.perStatus.completed || 0, bad = d.perStatus.failed || 0, tools = Object.entries(d.perTool).sort((x, y) => y[1] - x[1]), mx = tools.length ? tools[0][1] : 1;
-  const k = (n, l) => `<div class="card"><h3>${n}</h3><p>${l}</p></div>`;
+  const k = (n, l) => `<div class="card"><div><h3>${n}</h3><p>${l}</p></div></div>`;
   $('#a').innerHTML = `<div class="cards">${k(d.totalJobs, 'Total pekerjaan')}${k(d.totalUsers, 'Pengguna terdaftar')}${k(ok, 'Berhasil')}${k(bad, 'Gagal')}</div>
   <h2>Penggunaan per tool</h2>${tools.length ? `<div class="scroll"><table><thead><tr><th>Tool</th><th>Jumlah</th><th>Proporsi</th></tr></thead><tbody>${tools.map(([n, c]) => `<tr><td>${esc(n)}</td><td>${c}</td><td><progress value="${c}" max="${mx}" aria-label="${esc(n)}"></progress></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada pekerjaan tercatat.</p>'}
   <h2>Pengguna</h2>${u.success ? `<div class="scroll"><table><thead><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Terdaftar</th></tr></thead><tbody>${u.data.map(x => `<tr><td>${esc(x.nama)}</td><td>${esc(x.email)}</td><td><span class="badge">${esc(x.peran)}</span></td><td>${esc(x.tgl_daftar)}</td></tr>`).join('')}</tbody></table></div>` : '<p>' + esc(u.message) + '</p>'}`;
