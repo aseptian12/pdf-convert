@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s), app = $('#app');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const S = { token: localStorage.getItem('tok') || '', user: JSON.parse(localStorage.getItem('usr') || 'null') };
-const maxMB = () => S.user ? CFG.MAX_MB_USER : CFG.MAX_MB_GUEST;
+const MB = { guest: 30, user: 100 }, maxMB = () => S.user ? MB.user : MB.guest;
 const toast = m => { const t = $('#toast'); t.textContent = m; t.className = 'show'; setTimeout(() => t.className = '', 3500); };
 
 // ---- API (POST wajib text/plain agar tidak kena preflight CORS) ----
@@ -13,7 +13,14 @@ async function api(action, data) {
     return await r.json();
   } catch (e) { return { success: false, message: 'Gagal terhubung ke server: ' + e.message }; }
 }
-function setAuth(t, u) { S.token = t; S.user = u; localStorage.setItem('tok', t); localStorage.setItem('usr', JSON.stringify(u)); renderTop(); }
+function setAuth(t, u) { localStorage.removeItem('hist'); S.token = t; S.user = u; localStorage.setItem('tok', t); localStorage.setItem('usr', JSON.stringify(u)); renderTop(); }
+
+// ---- Antrean log: UI tidak menunggu server; dikirim batch di latar belakang & dicoba ulang ----
+const Q = { get: () => { try { return JSON.parse(localStorage.getItem('q') || '[]'); } catch (e) { return []; } }, set: v => localStorage.setItem('q', JSON.stringify(v.slice(-100))) };
+let flushing = false;
+async function flush() { const q = Q.get(); if (flushing || !q.length) return; flushing = true; const r = await api('logBatch', { items: q }); flushing = false; if (r.success) Q.set(Q.get().slice(q.length)); }
+const queueLog = o => { Q.set([...Q.get(), o]); setTimeout(flush, 800); };
+let PR = () => {};
 
 // ---- Katalog 33 tool: [kategori, id, nama, deskripsi] ----
 const CATS = ['Organize PDF','Optimize PDF','Convert to PDF','Convert from PDF','Edit PDF','PDF Security','PDF Intelligence'];
@@ -33,7 +40,7 @@ const T = [
 [6,'summarize','AI Ringkasan','Ringkas isi dokumen'],[6,'translate','Terjemahan PDF','Terjemahkan dokumen'],[6,'pdf2md','PDF ke Markdown','Ekstrak ke teks Markdown']];
 const READY = new Set(['merge','split','remove','extract','rotate','jpg2pdf','organize','scan','compress','pdf2jpg','pagenum','watermark','crop','editpdf','forms','sign','redact','compare','pdf2md','repair','unlock','pdf2ppt','pdf2xls','html2pdf','word2pdf','excel2pdf','ppt2pdf','ocr','pdf2word','summarize','translate']);
 const CLOUD = new Set(['html2pdf','word2pdf','excel2pdf','ppt2pdf','ocr','pdf2word','summarize','translate']);
-const CLOUD_MB = { word2pdf: 5, excel2pdf: 5, ppt2pdf: 5, html2pdf: 2, ocr: 2, pdf2word: 2 };
+const CLOUD_MB = { word2pdf: 10, excel2pdf: 10, ppt2pdf: 10, html2pdf: 5, ocr: 2, pdf2word: 2 };
 
 // ---- Mesin PDF di browser (pdf-lib) ----
 const { PDFDocument, degrees } = window.PDFLib || {};
@@ -50,7 +57,7 @@ function parse(str, n) {
 let pj; const needPdfjs = () => pj = pj || new Promise((res, rej) => { const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
   el.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; res(); }; el.onerror = () => rej(Error('Gagal memuat pdf.js, periksa koneksi.')); document.head.appendChild(el); });
 async function pages(f, sc, pw) { await needPdfjs(); const d = await pdfjsLib.getDocument({ data: await f.arrayBuffer(), password: pw }).promise, out = [];
-  for (let i = 1; i <= d.numPages; i++) { const p = await d.getPage(i), vp = p.getViewport({ scale: sc }), c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; out.push(c); } return out; }
+  for (let i = 1; i <= d.numPages; i++) { const p = await d.getPage(i), vp = p.getViewport({ scale: sc }), c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; out.push(c); PR(i / d.numPages * 100, 'Halaman ' + i + '/' + d.numPages); } return out; }
 const b64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = () => rej(Error('Gagal membaca file')); r.readAsDataURL(f); });
 const fromB64 = (b, type) => { const a = atob(b), u = new Uint8Array(a.length); for (let i = 0; i < a.length; i++) u[i] = a.charCodeAt(i); return new Blob([u], { type }); };
 const lib = (u, g) => new Promise((res, rej) => { if (window[g]) return res(); const el = document.createElement('script'); el.src = u; el.onload = res; el.onerror = () => rej(Error('Gagal memuat pustaka dari CDN')); document.head.appendChild(el); });
@@ -62,7 +69,7 @@ async function texts(f) { await needPdfjs(); const d = await pdfjsLib.getDocumen
 async function raster(cs, sc) { const o = await PDFDocument.create(); for (const c of cs) { const im = await o.embedJpg(await (await jpg(c, sc.q)).arrayBuffer()); o.addPage([c.width / sc.s, c.height / sc.s]).drawImage(im, { x: 0, y: 0, width: c.width / sc.s, height: c.height / sc.s }); } return o; }
 const pg1 = (d, v) => { const n = d.getPageCount(), p = +v.page || 1; if (p < 1 || p > n) throw Error('Halaman harus 1-' + n); return d.getPage(p - 1); };
 const RUN = {
-  async merge(fs) { const o = await PDFDocument.create(); for (const f of fs) { const d = await load(f); (await o.copyPages(d, d.getPageIndices())).forEach(p => o.addPage(p)); } return [['gabungan.pdf', o]]; },
+  async merge(fs) { const o = await PDFDocument.create(); for (const [i, f] of fs.entries()) { PR(i / fs.length * 100, 'Berkas ' + (i + 1) + '/' + fs.length); const d = await load(f); (await o.copyPages(d, d.getPageIndices())).forEach(p => o.addPage(p)); } return [['gabungan.pdf', o]]; },
   async split(fs, v) { const d = await load(fs[0]); return Promise.all(parse(v.range, d.getPageCount()).map(async (ix, i) => ['bagian-' + (i + 1) + '.pdf', await pick(d, ix)])); },
   async extract(fs, v) { const d = await load(fs[0]); return [['ekstrak.pdf', await pick(d, parse(v.range, d.getPageCount()).flat())]]; },
   async remove(fs, v) { const d = await load(fs[0]), del = new Set(parse(v.range, d.getPageCount()).flat()), keep = d.getPageIndices().filter(i => !del.has(i)); if (!keep.length) throw Error('Semua halaman akan terhapus.'); return [['tanpa-halaman.pdf', await pick(d, keep)]]; },
@@ -179,9 +186,9 @@ function tool(id) {
   dz.ondrop = e => { e.preventDefault(); dz.classList.remove('on'); add([...e.dataTransfer.files]); };
   $('#fl').onclick = e => { const b = e.target.closest('button'); if (!b) return; const i = +b.dataset.i, a = b.dataset.a;
     if (a === 'x') files.splice(i, 1); else { const j = a === 'u' ? i - 1 : i + 1; if (files[j]) [files[i], files[j]] = [files[j], files[i]]; } fl(); };
-  const log = (st, msg) => api('logJob', { tool_id: id, status: st, ukuran_mb: +(files.reduce((a, f) => a + f.size, 0) / 1048576).toFixed(2), pesan: msg });
+  const log = (st, msg) => queueLog({ tool_id: id, status: st, ukuran_mb: +(files.reduce((a, f) => a + f.size, 0) / 1048576).toFixed(2), pesan: msg });
   $('#go').onclick = async () => {
-    const b = $('#go'), res = $('#res'); b.disabled = true; b.textContent = 'Memproses…'; res.innerHTML = '';
+    const b = $('#go'), res = $('#res'); b.disabled = true; b.textContent = 'Memproses…'; res.innerHTML = `<progress id="pg" max="100" style="width:100%"></progress><p id="pt" class="mut">${CLOUD.has(id) ? 'Mengunggah dan memproses di server Google (bisa 10-60 detik)…' : 'Memproses…'}</p>`; PR = (p, t) => { const e = $('#pg'); if (e) { e.value = p; $('#pt').textContent = t; } }; await new Promise(r => requestAnimationFrame(() => setTimeout(r)));
     try {
       const v = {}, x = {};
       for (const f of OPTS[id] || []) { const el = $('#f_' + f[0]); if (el.dataset.req !== undefined && !(f[2] === 'f' ? el.files.length : el.value.trim())) throw Error('Lengkapi: ' + f[1]); if (f[2] === 'f') x[f[0]] = el.files[0]; else v[f[0]] = el.value; }
@@ -208,9 +215,13 @@ function masuk(mode) {
 }
 async function riwayat() {
   if (!S.user) { location.hash = '#/masuk'; return; }
-  app.innerHTML = '<h1>Riwayat Pekerjaan</h1><div id="h">Memuat…</div>'; const r = await api('history');
-  if (!r.success) { if (/sesi/i.test(r.message)) { setAuth('', null); location.hash = '#/masuk'; return; } $('#h').textContent = r.message; return; }
-  $('#h').innerHTML = r.data.length ? `<div class="scroll"><table><thead><tr><th>Waktu</th><th>Tool</th><th>Ukuran</th><th>Status</th></tr></thead><tbody>${r.data.map(j => `<tr><td>${esc(j.waktu)}</td><td>${esc(j.tool_id)}</td><td>${esc(j.ukuran_mb)} MB</td><td><span class="badge ${j.status === 'failed' ? 'bad' : ''}">${esc(j.status)}</span></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada riwayat.</p>';
+  const draw = d => { if (!$('#h')) return; $('#h').innerHTML = d.length ? `<div class="scroll"><table><thead><tr><th>Waktu</th><th>Tool</th><th>Ukuran</th><th>Status</th></tr></thead><tbody>${d.map(j => `<tr><td>${esc(j.waktu)}</td><td>${esc(j.tool_id)}</td><td>${esc(j.ukuran_mb)} MB</td><td><span class="badge ${j.status === 'failed' ? 'bad' : ''}">${esc(j.status)}</span></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada riwayat.</p>'; };
+  let c = null; try { c = JSON.parse(localStorage.getItem('hist') || 'null'); } catch (e) {}
+  app.innerHTML = '<h1>Riwayat Pekerjaan</h1><div id="h">' + (c ? '' : '<div class="sk"></div><div class="sk"></div><div class="sk"></div>') + '</div>';
+  if (c) draw(c);
+  await flush(); const r = await api('history');
+  if (!r.success) { if (/sesi/i.test(r.message)) { setAuth('', null); location.hash = '#/masuk'; return; } if (!c && $('#h')) $('#h').textContent = r.message; return; }
+  localStorage.setItem('hist', JSON.stringify(r.data)); draw(r.data);
 }
 async function admin() {
   if (!S.user || S.user.peran !== 'admin') { location.hash = '#/'; toast('Halaman ini khusus admin.'); return; }
@@ -228,3 +239,12 @@ function route() {
   ({ masuk: () => masuk('login'), daftar: () => masuk('daftar'), riwayat, tool: () => tool(h[1]), admin }[h[0]] || home)();
 }
 addEventListener('hashchange', route); route();
+
+// ---- Percepatan: pemanasan server, prefetch pustaka, service worker ----
+const idle = f => (window.requestIdleCallback || setTimeout)(f, 1500);
+idle(() => {
+  if (CFG.GAS_URL && !CFG.GAS_URL.includes('XXXX')) { fetch(CFG.GAS_URL, { mode: 'no-cors' }).catch(() => {}); flush(); }
+  if (!(navigator.connection || {}).saveData) needPdfjs().catch(() => {});
+});
+addEventListener('online', flush);
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
