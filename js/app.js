@@ -31,7 +31,9 @@ const T = [
 [5,'sign','Tanda Tangan PDF','Tanda tangan visual'],[5,'redact','Redaksi PDF','Hitamkan area sensitif'],[5,'compare','Bandingkan PDF','Bandingkan dua dokumen'],
 [5,'protect','Kunci PDF','Beri kata sandi'],[5,'unlock','Buka PDF','Buka kunci dokumen Anda'],
 [6,'summarize','AI Ringkasan','Ringkas isi dokumen'],[6,'translate','Terjemahan PDF','Terjemahkan dokumen'],[6,'pdf2md','PDF ke Markdown','Ekstrak ke teks Markdown']];
-const READY = new Set(['merge','split','remove','extract','rotate','jpg2pdf']);
+const READY = new Set(['merge','split','remove','extract','rotate','jpg2pdf','organize','scan','compress','pdf2jpg','pagenum','watermark','crop','editpdf','forms','sign','redact','compare','pdf2md','repair','unlock','pdf2ppt','pdf2xls','html2pdf','word2pdf','excel2pdf','ppt2pdf','ocr','pdf2word','summarize','translate']);
+const CLOUD = new Set(['html2pdf','word2pdf','excel2pdf','ppt2pdf','ocr','pdf2word','summarize','translate']);
+const CLOUD_MB = { word2pdf: 5, excel2pdf: 5, ppt2pdf: 5, html2pdf: 2, ocr: 2, pdf2word: 2 };
 
 // ---- Mesin PDF di browser (pdf-lib) ----
 const { PDFDocument, degrees } = window.PDFLib || {};
@@ -44,13 +46,57 @@ function parse(str, n) {
     return Array.from({ length: b - a + 1 }, (_, i) => a - 1 + i);
   });
 }
+// ---- pdf.js dimuat saat dibutuhkan (render halaman & ekstrak teks) ----
+let pj; const needPdfjs = () => pj = pj || new Promise((res, rej) => { const el = document.createElement('script'); el.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+  el.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'; res(); }; el.onerror = () => rej(Error('Gagal memuat pdf.js, periksa koneksi.')); document.head.appendChild(el); });
+async function pages(f, sc, pw) { await needPdfjs(); const d = await pdfjsLib.getDocument({ data: await f.arrayBuffer(), password: pw }).promise, out = [];
+  for (let i = 1; i <= d.numPages; i++) { const p = await d.getPage(i), vp = p.getViewport({ scale: sc }), c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height; await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; out.push(c); } return out; }
+const b64 = f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(',')[1]); r.onerror = () => rej(Error('Gagal membaca file')); r.readAsDataURL(f); });
+const fromB64 = (b, type) => { const a = atob(b), u = new Uint8Array(a.length); for (let i = 0; i < a.length; i++) u[i] = a.charCodeAt(i); return new Blob([u], { type }); };
+const lib = (u, g) => new Promise((res, rej) => { if (window[g]) return res(); const el = document.createElement('script'); el.src = u; el.onload = res; el.onerror = () => rej(Error('Gagal memuat pustaka dari CDN')); document.head.appendChild(el); });
+async function drv(f, mode) { const r = await api('convert', { mode, name: f.name, data: await b64(f) }); if (!r.success) throw Error(r.message); return r.data.files.map(x => [x.name, fromB64(x.b64, x.type)]); }
+async function ai(f, v, task) { const t = (await texts(f)).join('\n\n'); if (!t.trim()) throw Error('PDF tidak berisi teks (hasil scan butuh OCR).'); const r = await api('ai', { task, lang: v.lang, text: t }); if (!r.success) throw Error(r.message); return [[task + '.md', new Blob([r.data.text], { type: 'text/markdown' })]]; }
+const jpg = (c, q) => new Promise(r => c.toBlob(r, 'image/jpeg', q));
+async function texts(f) { await needPdfjs(); const d = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise, o = [];
+  for (let i = 1; i <= d.numPages; i++) { const t = await (await d.getPage(i)).getTextContent(); o.push(t.items.map(x => x.str).join(' ').replace(/\s+/g, ' ').trim()); } return o; }
+async function raster(cs, sc) { const o = await PDFDocument.create(); for (const c of cs) { const im = await o.embedJpg(await (await jpg(c, sc.q)).arrayBuffer()); o.addPage([c.width / sc.s, c.height / sc.s]).drawImage(im, { x: 0, y: 0, width: c.width / sc.s, height: c.height / sc.s }); } return o; }
+const pg1 = (d, v) => { const n = d.getPageCount(), p = +v.page || 1; if (p < 1 || p > n) throw Error('Halaman harus 1-' + n); return d.getPage(p - 1); };
 const RUN = {
   async merge(fs) { const o = await PDFDocument.create(); for (const f of fs) { const d = await load(f); (await o.copyPages(d, d.getPageIndices())).forEach(p => o.addPage(p)); } return [['gabungan.pdf', o]]; },
   async split(fs, v) { const d = await load(fs[0]); return Promise.all(parse(v.range, d.getPageCount()).map(async (ix, i) => ['bagian-' + (i + 1) + '.pdf', await pick(d, ix)])); },
   async extract(fs, v) { const d = await load(fs[0]); return [['ekstrak.pdf', await pick(d, parse(v.range, d.getPageCount()).flat())]]; },
   async remove(fs, v) { const d = await load(fs[0]), del = new Set(parse(v.range, d.getPageCount()).flat()), keep = d.getPageIndices().filter(i => !del.has(i)); if (!keep.length) throw Error('Semua halaman akan terhapus.'); return [['tanpa-halaman.pdf', await pick(d, keep)]]; },
   async rotate(fs, v) { const d = await load(fs[0]); d.getPages().forEach(p => p.setRotation(degrees((p.getRotation().angle + +v.deg) % 360))); return [['diputar.pdf', d]]; },
-  async jpg2pdf(fs) { const o = await PDFDocument.create(); for (const f of fs) { const b = await f.arrayBuffer(), img = /png$/i.test(f.name) ? await o.embedPng(b) : await o.embedJpg(b); o.addPage([img.width, img.height]).drawImage(img, { x: 0, y: 0, width: img.width, height: img.height }); } return [['gambar.pdf', o]]; }
+  async jpg2pdf(fs) { const o = await PDFDocument.create(); for (const f of fs) { const b = await f.arrayBuffer(), img = /png$/i.test(f.name) ? await o.embedPng(b) : await o.embedJpg(b); o.addPage([img.width, img.height]).drawImage(img, { x: 0, y: 0, width: img.width, height: img.height }); } return [['gambar.pdf', o]]; },
+  async organize(fs, v) { const d = await load(fs[0]); return [['diatur-ulang.pdf', await pick(d, parse(v.range, d.getPageCount()).flat())]]; },
+  async scan(fs) { const o = await PDFDocument.create(); for (const f of fs) { const bm = await createImageBitmap(f), c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height; c.getContext('2d').drawImage(bm, 0, 0); const im = await o.embedJpg(await (await jpg(c, .9)).arrayBuffer()); o.addPage([im.width, im.height]).drawImage(im, { x: 0, y: 0, width: im.width, height: im.height }); } return [['scan.pdf', o]]; },
+  async pagenum(fs, v) { const d = await load(fs[0]), f = await d.embedFont(PDFLib.StandardFonts.Helvetica); d.getPages().forEach((p, i) => { const w = p.getSize().width, t = String(i + +v.start), tw = f.widthOfTextAtSize(t, 11); p.drawText(t, { x: v.pos === 'l' ? 30 : v.pos === 'r' ? w - 30 - tw : (w - tw) / 2, y: 20, size: 11, font: f }); }); return [['bernomor.pdf', d]]; },
+  async watermark(fs, v) { const d = await load(fs[0]), f = await d.embedFont(PDFLib.StandardFonts.HelveticaBold); d.getPages().forEach(p => { const { width: w, height: h } = p.getSize(), z = Math.min(w, h) / 9, tw = f.widthOfTextAtSize(v.text, z), k = tw / 2 * Math.SQRT1_2; p.drawText(v.text, { x: w / 2 - k, y: h / 2 - k, size: z, font: f, rotate: degrees(45), opacity: .25, color: PDFLib.rgb(.4, .4, .4) }); }); return [['watermark.pdf', d]]; },
+  async crop(fs, v) { const d = await load(fs[0]); d.getPages().forEach(p => { const { width: w, height: h } = p.getSize(), t = +v.t || 0, r = +v.r || 0, b = +v.b || 0, l = +v.l || 0; if (w - l - r <= 0 || h - t - b <= 0) throw Error('Potongan melebihi ukuran halaman.'); p.setCropBox(l, b, w - l - r, h - t - b); }); return [['dipotong.pdf', d]]; },
+  async editpdf(fs, v) { const d = await load(fs[0]), f = await d.embedFont(PDFLib.StandardFonts.Helvetica); pg1(d, v).drawText(v.text, { x: +v.x, y: +v.y, size: +v.size || 12, font: f }); return [['teks-ditambah.pdf', d]]; },
+  async sign(fs, v, x) { const d = await load(fs[0]), s = x.sig, b = await s.arrayBuffer(), im = /png$/i.test(s.name) ? await d.embedPng(b) : await d.embedJpg(b), w = +v.w || 120; pg1(d, v).drawImage(im, { x: +v.x, y: +v.y, width: w, height: w * im.height / im.width }); return [['ditandatangani.pdf', d]]; },
+  async forms(fs, v) { const d = await load(fs[0]), fm = d.getForm(), names = fm.getFields().map(f => f.getName()); if (!names.length) throw Error('PDF ini tidak punya kolom formulir.'); if (!v.text.trim()) throw Error('Kolom tersedia: ' + names.join(', '));
+    v.text.split('\n').map(l => l.trim()).filter(Boolean).forEach(l => { const i = l.indexOf('='), k = l.slice(0, i).trim(); if (i < 1 || !names.includes(k)) throw Error('Kolom "' + k + '" tidak ada. Tersedia: ' + names.join(', ')); fm.getTextField(k).setText(l.slice(i + 1).trim()); }); return [['formulir-terisi.pdf', d]]; },
+  async compress(fs, v) { const [s, q] = v.q.split(',').map(Number); return [['terkompres.pdf', await raster(await pages(fs[0], s), { s, q })]]; },
+  async pdf2jpg(fs) { const cs = await pages(fs[0], 2); return Promise.all(cs.map(async (c, i) => ['halaman-' + (i + 1) + '.jpg', await jpg(c, .92)])); },
+  async redact(fs, v) { const cs = await pages(fs[0], 2), bx = v.text.split('\n').map(l => l.trim()).filter(Boolean).map(l => l.split(',').map(Number));
+    if (!bx.length || bx.some(b => b.length !== 5 || b.some(isNaN))) throw Error('Format tiap baris: halaman,x,y,lebar,tinggi');
+    bx.forEach(([p, x, y, w, h]) => { const c = cs[p - 1]; if (!c) throw Error('Halaman ' + p + ' tidak ada'); const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(x * 2, y * 2, w * 2, h * 2); }); return [['teredaksi.pdf', await raster(cs, { s: 2, q: .9 })]]; },
+  async pdf2md(fs) { const t = await texts(fs[0]); if (!t.some(Boolean)) throw Error('PDF tidak berisi teks (mungkin hasil scan).'); return [['dokumen.md', new Blob(['# ' + fs[0].name + '\n\n' + t.map((x, i) => '## Halaman ' + (i + 1) + '\n\n' + x).join('\n\n')], { type: 'text/markdown' })]]; },
+  async compare(fs) { if (fs.length !== 2) throw Error('Pilih tepat 2 PDF.'); const [a, b] = await Promise.all(fs.map(texts)), n = Math.max(a.length, b.length), r = ['# Perbandingan PDF', '', 'A: ' + fs[0].name + ' (' + a.length + ' hal)', 'B: ' + fs[1].name + ' (' + b.length + ' hal)', '']; let df = 0;
+    for (let i = 0; i < n; i++) if ((a[i] || '') !== (b[i] || '')) { df++; r.push('- Halaman ' + (i + 1) + ': berbeda'); } r.push('', df ? 'Total halaman berbeda: ' + df : 'Teks kedua dokumen identik.'); return [['perbandingan.md', new Blob([r.join('\n')], { type: 'text/markdown' })]]; },
+  async repair(fs) { try { const d = await PDFDocument.load(await fs[0].arrayBuffer(), { ignoreEncryption: true, throwOnInvalidObject: false, updateMetadata: false }), o = await PDFDocument.create(); (await o.copyPages(d, d.getPageIndices())).forEach(p => o.addPage(p)); return [['diperbaiki.pdf', o]]; } catch (e) { return [['diperbaiki-gambar.pdf', await raster(await pages(fs[0], 1.5), { s: 1.5, q: .8 })]]; } },
+  async unlock(fs, v) { return [['terbuka.pdf', await raster(await pages(fs[0], 2, v.pw), { s: 2, q: .9 })]]; },
+  async pdf2ppt(fs) { await lib('https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js', 'PptxGenJS'); const cs = await pages(fs[0], 2), p = new PptxGenJS(); p.defineLayout({ name: 'PG', width: cs[0].width / 144, height: cs[0].height / 144 }); p.layout = 'PG'; for (const c of cs) p.addSlide().addImage({ data: c.toDataURL('image/jpeg', .85), x: 0, y: 0, w: '100%', h: '100%' }); return [['slide.pptx', await p.write({ outputType: 'blob' })]]; },
+  async pdf2xls(fs) { await Promise.all([needPdfjs(), lib('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', 'XLSX')]); const d = await pdfjsLib.getDocument({ data: await fs[0].arrayBuffer() }).promise, wb = XLSX.utils.book_new(); let any = false;
+    for (let i = 1; i <= d.numPages; i++) { const it = (await (await d.getPage(i)).getTextContent()).items.filter(x => x.str.trim()), rows = []; it.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
+      for (const x of it) { const y = x.transform[5], l = rows[rows.length - 1]; if (l && Math.abs(l.y - y) < 3) l.c.push(x); else rows.push({ y, c: [x] }); }
+      const aoa = rows.map(r => { r.c.sort((a, b) => a.transform[4] - b.transform[4]); const cells = []; let end = -1e9; for (const x of r.c) { if (cells.length && x.transform[4] - end < 6) cells[cells.length - 1] += ' ' + x.str; else cells.push(x.str); end = x.transform[4] + x.width; } return cells; });
+      if (aoa.length) any = true; XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Halaman ' + i); }
+    if (!any) throw Error('PDF tidak berisi teks (mungkin hasil scan).'); return [['tabel.xlsx', new Blob([XLSX.write(wb, { type: 'array', bookType: 'xlsx' })], { type: 'application/octet-stream' })]]; },
+  html2pdf: fs => drv(fs[0], 'html'), word2pdf: fs => drv(fs[0], 'office'), excel2pdf: fs => drv(fs[0], 'office'), ppt2pdf: fs => drv(fs[0], 'office'),
+  ocr: fs => drv(fs[0], 'ocr'), pdf2word: fs => drv(fs[0], 'docx'),
+  summarize: (fs, v) => ai(fs[0], v, 'ringkasan'), translate: (fs, v) => ai(fs[0], v, 'terjemahan')
 };
 
 // ---- Tampilan ----
@@ -60,30 +106,49 @@ function renderTop() {
   ${S.user ? '<button id="out" class="btn o">Keluar</button>' : '<a class="btn" href="#/masuk">Masuk</a>'}</div>`;
   const o = $('#out'); if (o) o.onclick = () => { api('logout'); setAuth('', null); location.hash = '#/'; };
 }
-const card = t => { const r = READY.has(t[1]); return `<a class="card ${r ? '' : 'off'}" ${r ? `href="#/tool/${t[1]}"` : 'aria-disabled="true"'}><span class="badge">${r ? 'Browser' : 'Segera hadir'}</span><h3>${t[2]}</h3><p>${t[3]}</p></a>`; };
+const card = t => { const r = READY.has(t[1]); return `<a class="card ${r ? '' : 'off'}" ${r ? `href="#/tool/${t[1]}"` : 'aria-disabled="true"'}><span class="badge">${r ? (CLOUD.has(t[1]) ? 'Cloud' : 'Browser') : 'Segera hadir'}</span><h3>${t[2]}</h3><p>${t[3]}</p></a>`; };
 function home() {
   app.innerHTML = `<section class="hero"><h1>Semua tools PDF dalam satu tempat</h1><p>Proses langsung di browser Anda. File tidak diunggah.</p>
   <label class="sr" for="q">Cari tool</label><input id="q" type="search" placeholder="Cari tool, mis. Gabung PDF"></section><div id="cats"></div>`;
   const draw = q => { $('#cats').innerHTML = CATS.map((c, i) => { const l = T.filter(t => t[0] === i && (t[2] + t[3]).toLowerCase().includes(q)); return l.length ? `<section class="cat"><h2>${c} <span class="mut">(${l.length})</span></h2><div class="cards">${l.map(card).join('')}</div></section>` : ''; }).join('') || '<p>Tool tidak ditemukan.</p>'; };
   draw(''); $('#q').oninput = e => draw(e.target.value.toLowerCase());
 }
+const OPTS = {
+  unlock: [['pw', 'Kata sandi dokumen', 'p', '']], summarize: [['lang', 'Bahasa ringkasan', 's', ['Indonesia', 'English']]], translate: [['lang', 'Terjemahkan ke', 's', ['Indonesia', 'English', 'Jepang', 'Mandarin', 'Arab']]],
+  split: [['range', 'Rentang halaman (tiap rentang jadi file terpisah)', 't', '1-3,4-6']], extract: [['range', 'Halaman yang diambil', 't', '1-3,5']],
+  remove: [['range', 'Halaman yang dihapus', 't', '2,4-5']], organize: [['range', 'Urutan halaman baru (boleh diulang atau dihilangkan)', 't', '3,1,2-4']],
+  rotate: [['deg', 'Putar searah jarum jam', 's', ['90:90°', '180:180°', '270:270°']]],
+  pagenum: [['pos', 'Posisi nomor', 's', ['t:Tengah', 'l:Kiri', 'r:Kanan']], ['start', 'Nomor awal', 'n', 1]],
+  watermark: [['text', 'Teks watermark', 't', 'RAHASIA']],
+  crop: [['t', 'Atas (pt)', 'n', 0], ['r', 'Kanan (pt)', 'n', 0], ['b', 'Bawah (pt)', 'n', 0], ['l', 'Kiri (pt)', 'n', 0]],
+  editpdf: [['page', 'Halaman', 'n', 1], ['x', 'Posisi X (pt dari kiri)', 'n', 50], ['y', 'Posisi Y (pt dari bawah)', 'n', 50], ['size', 'Ukuran huruf', 'n', 12], ['text', 'Teks', 't', 'Isi teks']],
+  sign: [['sig', 'Gambar tanda tangan (PNG/JPG)', 'f', 'image/png,image/jpeg'], ['page', 'Halaman', 'n', 1], ['x', 'Posisi X (pt)', 'n', 50], ['y', 'Posisi Y (pt)', 'n', 50], ['w', 'Lebar (pt)', 'n', 120]],
+  forms: [['text', 'Isi kolom, satu baris "nama=nilai" (kosongkan untuk melihat daftar kolom)', 'a', 'NamaLengkap=Budi', 1]],
+  compress: [['q', 'Kualitas', 's', ['1.5,0.7:Tinggi', '1.2,0.5:Sedang', '1,0.35:Rendah']]],
+  redact: [['text', 'Area dihitamkan, satu baris "halaman,x,y,lebar,tinggi" (pt, dari kiri-atas)', 'a', '1,50,100,200,20']]
+};
+const NOTE = { repair: 'Perbaikan dasar; jika struktur terlalu rusak, halaman dijadikan gambar.', unlock: 'Hanya untuk dokumen yang Anda berhak buka. Hasil berupa gambar (teks tidak bisa dipilih).', pdf2ppt: 'Setiap halaman menjadi satu slide berupa gambar (tidak bisa diedit).', pdf2xls: 'Tabel dideteksi dari posisi teks; hasil perlu dirapikan.', html2pdf: 'Unggah berkas .html mandiri (gaya inline).', word2pdf: 'Dikonversi oleh Google; tata letak bisa sedikit berbeda.', excel2pdf: 'Dikonversi oleh Google; tata letak bisa sedikit berbeda.', ppt2pdf: 'Dikonversi oleh Google; tata letak bisa sedikit berbeda.', ocr: 'OCR oleh Google Docs; PDF hasil disusun ulang dan teks juga diberikan sebagai .txt.', pdf2word: 'OCR dan konversi oleh Google Docs; layout kompleks bisa berubah.', summarize: 'Teks PDF dikirim ke layanan AI melalui server Anda.', translate: 'Teks PDF dikirim ke layanan AI melalui server Anda.', compress: 'Halaman diubah menjadi gambar: teks tidak bisa dipilih lagi dan ukuran bisa lebih besar.', redact: 'Seluruh halaman dijadikan gambar agar teks di area hitam benar-benar hilang.', sign: 'Tanda tangan visual (gambar), bukan tanda tangan digital.', watermark: 'Hanya karakter Latin.', pdf2md: 'Hanya untuk PDF berisi teks; hasil scan butuh OCR.', compare: 'Membandingkan teks per halaman.', forms: 'Mengisi kolom teks formulir.' };
 function tool(id) {
   const t = T.find(x => x[1] === id); if (!t || !READY.has(id)) { location.hash = '#/'; return; }
-  const img = id === 'jpg2pdf', multi = id === 'merge' || img;
-  const opt = { split: 'Rentang halaman (tiap rentang jadi file terpisah), mis. 1-3,4-6', extract: 'Halaman yang diambil, mis. 1-3,5', remove: 'Halaman yang dihapus, mis. 2,4-5' }[id];
-  app.innerHTML = `<nav class="crumb"><a href="#/">Beranda</a> / ${CATS[t[0]]} / <b>${t[2]}</b></nav><h1>${t[2]} <span class="badge">Browser</span></h1><p>${t[3]}. Maks ${maxMB()} MB per file.</p>
-  <div class="grid2"><div><label class="drop" id="drop" tabindex="0"><input id="fi" type="file" accept="${img ? 'image/jpeg,image/png' : 'application/pdf'}" ${multi ? 'multiple' : ''} hidden><b>Seret &amp; lepas berkas ke sini</b><span>atau klik untuk memilih</span></label><ul id="fl" class="fl"></ul></div>
-  <aside class="panel"><h2>Opsi</h2>${opt ? `<label for="rg">${opt}</label><input id="rg" placeholder="1-3,5">` : ''}
-  ${id === 'rotate' ? '<label for="dg">Putar searah jarum jam</label><select id="dg"><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>' : ''}
-  ${!opt && id !== 'rotate' ? `<p class="mut">${multi ? 'Urutan mengikuti daftar berkas.' : 'Tidak ada opsi tambahan.'}</p>` : ''}
-  <button id="go" class="btn" disabled>Proses</button><div id="res"></div></aside></div>`;
+  if (CLOUD.has(id) && !S.user) { app.innerHTML = `<h1>${t[2]} <span class="badge">Cloud</span></h1><p>Tool ini memakai layanan Google dan memerlukan akun.</p><a class="btn" href="#/masuk">Masuk</a>`; return; }
+  const multi = ['merge', 'jpg2pdf', 'scan', 'compare'].includes(id), EXT = { jpg2pdf: /\.(jpe?g|png)$/i, scan: /\.(jpe?g|png|webp)$/i, word2pdf: /\.docx$/i, excel2pdf: /\.xlsx$/i, ppt2pdf: /\.pptx$/i, html2pdf: /\.html?$/i, ocr: /\.(pdf|jpe?g|png)$/i },
+    acc = { jpg2pdf: 'image/jpeg,image/png', scan: 'image/*', word2pdf: '.docx', excel2pdf: '.xlsx', ppt2pdf: '.pptx', html2pdf: '.html,.htm', ocr: 'application/pdf,image/jpeg,image/png' }[id] || 'application/pdf';
+  const okT = f => (EXT[id] || /\.pdf$/i).test(f.name), lim = () => Math.min(maxMB(), CLOUD_MB[id] || 1e9);
+  const fld = ([k, l, ty, x, opt]) => { const i = 'f_' + k, L = `<label for="${i}">${l}</label>`;
+    if (ty === 's') return L + `<select id="${i}">${x.map(o => { const [v, n = v] = o.split(':'); return `<option value="${v}">${n}</option>`; }).join('')}</select>`;
+    if (ty === 'a') return L + `<textarea id="${i}" rows="4" placeholder="${esc(x)}" ${opt ? '' : 'data-req'} style="width:100%;border:1px solid #64748b;border-radius:8px;padding:8px 12px;font:inherit;margin:4px 0 12px"></textarea>`;
+    if (ty === 'f') return L + `<input id="${i}" type="file" accept="${x}" data-req>`;
+    return L + `<input id="${i}" type="${ty === 'n' ? 'number' : ty === 'p' ? 'password' : 'text'}" ${ty === 'n' ? `value="${x}" step="any"` : `placeholder="${esc(x)}"`} data-req>`; };
+  app.innerHTML = `<nav class="crumb"><a href="#/">Beranda</a> / ${CATS[t[0]]} / <b>${t[2]}</b></nav><h1>${t[2]} <span class="badge">${CLOUD.has(id) ? 'Cloud' : 'Browser'}</span></h1><p>${t[3]}. Maks ${lim()} MB per file.${NOTE[id] ? ' <span class="mut">' + NOTE[id] + '</span>' : ''}</p>
+  <div class="grid2"><div><label class="drop" id="drop" tabindex="0"><input id="fi" type="file" accept="${acc}" ${multi ? 'multiple' : ''} hidden><b>Seret &amp; lepas berkas ke sini</b><span>atau klik untuk memilih</span></label><ul id="fl" class="fl"></ul></div>
+  <aside class="panel"><h2>Opsi</h2>${(OPTS[id] || []).map(fld).join('') || `<p class="mut">${multi ? 'Urutan mengikuti daftar berkas.' : 'Tidak ada opsi tambahan.'}</p>`}
+  <button id="go" class="btn" disabled>Proses</button><div id="res" aria-live="polite"></div></aside></div>`;
   let files = [];
   const fl = () => { $('#fl').innerHTML = files.map((f, i) => `<li><span>${esc(f.name)} <small class="mut">${(f.size / 1048576).toFixed(2)} MB</small></span>${multi ? `<button class="btn o" data-i="${i}" data-a="u" aria-label="Naikkan">↑</button><button class="btn o" data-i="${i}" data-a="d" aria-label="Turunkan">↓</button>` : ''}<button class="btn o" data-i="${i}" data-a="x" aria-label="Hapus ${esc(f.name)}">×</button></li>`).join(''); $('#go').disabled = !files.length; };
   const add = list => {
     for (const f of list) {
-      const okT = img ? /^image\/(jpeg|png)$/.test(f.type) : f.type === 'application/pdf';
-      if (!okT) { toast('Tipe file tidak didukung: ' + f.name); continue; }
-      if (f.size > maxMB() * 1048576) { toast(f.name + ' melebihi ' + maxMB() + ' MB' + (S.user ? '' : '. Masuk untuk batas lebih besar.')); continue; }
+      if (!okT(f)) { toast('Tipe file tidak didukung: ' + f.name); continue; }
+      if (f.size > lim() * 1048576) { toast(f.name + ' melebihi ' + lim() + ' MB' + (S.user ? '' : '. Masuk untuk batas lebih besar.')); continue; }
       files = multi ? [...files, f] : [f];
     } fl();
   };
@@ -97,10 +162,10 @@ function tool(id) {
   $('#go').onclick = async () => {
     const b = $('#go'), res = $('#res'); b.disabled = true; b.textContent = 'Memproses…'; res.innerHTML = '';
     try {
-      const v = { range: $('#rg') ? $('#rg').value : '', deg: $('#dg') ? $('#dg').value : 0 };
-      if ($('#rg') && !v.range.trim()) throw Error('Isi halaman terlebih dahulu.');
-      const out = await RUN[id](files, v); let h = '<p class="ok">Selesai</p><ul class="fl">';
-      for (const [n, d] of out) { const u = URL.createObjectURL(new Blob([await d.save()], { type: 'application/pdf' })); h += `<li><span>${n}</span><a class="btn" download="${n}" href="${u}">Unduh</a></li>`; }
+      const v = {}, x = {};
+      for (const f of OPTS[id] || []) { const el = $('#f_' + f[0]); if (el.dataset.req !== undefined && !(f[2] === 'f' ? el.files.length : el.value.trim())) throw Error('Lengkapi: ' + f[1]); if (f[2] === 'f') x[f[0]] = el.files[0]; else v[f[0]] = el.value; }
+      const out = await RUN[id](files, v, x); let h = '<p class="ok">Selesai</p><ul class="fl">';
+      for (const [n, d] of out) { const bl = d instanceof Blob ? d : new Blob([await d.save()], { type: 'application/pdf' }), u = URL.createObjectURL(bl); h += `<li><span>${esc(n)} <small class="mut">${(bl.size / 1048576).toFixed(2)} MB</small></span><a class="btn" download="${esc(n)}" href="${u}">Unduh</a></li>`; }
       res.innerHTML = h + '</ul>'; log('completed', '');
     } catch (e) { res.innerHTML = `<p class="err">Gagal: ${esc(e.message)}</p>`; log('failed', e.message); }
     b.textContent = 'Proses'; b.disabled = !files.length;
