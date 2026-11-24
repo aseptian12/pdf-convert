@@ -55,7 +55,7 @@ const RUN = {
 
 // ---- Tampilan ----
 function renderTop() {
-  $('#top').innerHTML = `<a class="logo" href="#/"><b>P</b> PDF CONVERTER</a><nav><a href="#/">Semua Tools</a><a href="#/riwayat">Riwayat</a></nav>
+  $('#top').innerHTML = `<a class="logo" href="#/"><b>P</b> PDF CONVERTER</a><nav><a href="#/">Semua Tools</a><a href="#/riwayat">Riwayat</a>${S.user && S.user.peran === 'admin' ? '<a href="#/admin">Admin</a>' : ''}</nav>
   <div class="who"><span class="chip">${S.user ? esc(S.user.nama) + ' · ' + maxMB() + ' MB' : 'Tamu · maks ' + maxMB() + ' MB'}</span>
   ${S.user ? '<button id="out" class="btn o">Keluar</button>' : '<a class="btn" href="#/masuk">Masuk</a>'}</div>`;
   const o = $('#out'); if (o) o.onclick = () => { api('logout'); setAuth('', null); location.hash = '#/'; };
@@ -126,8 +126,19 @@ async function riwayat() {
   if (!r.success) { if (/sesi/i.test(r.message)) { setAuth('', null); location.hash = '#/masuk'; return; } $('#h').textContent = r.message; return; }
   $('#h').innerHTML = r.data.length ? `<div class="scroll"><table><thead><tr><th>Waktu</th><th>Tool</th><th>Ukuran</th><th>Status</th></tr></thead><tbody>${r.data.map(j => `<tr><td>${esc(j.waktu)}</td><td>${esc(j.tool_id)}</td><td>${esc(j.ukuran_mb)} MB</td><td><span class="badge ${j.status === 'failed' ? 'bad' : ''}">${esc(j.status)}</span></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada riwayat.</p>';
 }
+async function admin() {
+  if (!S.user || S.user.peran !== 'admin') { location.hash = '#/'; toast('Halaman ini khusus admin.'); return; }
+  app.innerHTML = '<h1>Dashboard Admin</h1><div id="a">Memuat…</div>';
+  const [s, u] = await Promise.all([api('adminStats'), api('adminUsers')]);
+  if (!s.success) { if (/sesi/i.test(s.message)) { setAuth('', null); location.hash = '#/masuk'; return; } $('#a').textContent = s.message; return; }
+  const d = s.data, ok = d.perStatus.completed || 0, bad = d.perStatus.failed || 0, tools = Object.entries(d.perTool).sort((x, y) => y[1] - x[1]), mx = tools.length ? tools[0][1] : 1;
+  const k = (n, l) => `<div class="card"><h3>${n}</h3><p>${l}</p></div>`;
+  $('#a').innerHTML = `<div class="cards">${k(d.totalJobs, 'Total pekerjaan')}${k(d.totalUsers, 'Pengguna terdaftar')}${k(ok, 'Berhasil')}${k(bad, 'Gagal')}</div>
+  <h2>Penggunaan per tool</h2>${tools.length ? `<div class="scroll"><table><thead><tr><th>Tool</th><th>Jumlah</th><th>Proporsi</th></tr></thead><tbody>${tools.map(([n, c]) => `<tr><td>${esc(n)}</td><td>${c}</td><td><progress value="${c}" max="${mx}" aria-label="${esc(n)}"></progress></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada pekerjaan tercatat.</p>'}
+  <h2>Pengguna</h2>${u.success ? `<div class="scroll"><table><thead><tr><th>Nama</th><th>Email</th><th>Peran</th><th>Terdaftar</th></tr></thead><tbody>${u.data.map(x => `<tr><td>${esc(x.nama)}</td><td>${esc(x.email)}</td><td><span class="badge">${esc(x.peran)}</span></td><td>${esc(x.tgl_daftar)}</td></tr>`).join('')}</tbody></table></div>` : '<p>' + esc(u.message) + '</p>'}`;
+}
 function route() {
   const h = location.hash.replace(/^#\/?/, '').split('/'); renderTop(); window.scrollTo(0, 0);
-  ({ masuk: () => masuk('login'), daftar: () => masuk('daftar'), riwayat, tool: () => tool(h[1]) }[h[0]] || home)();
+  ({ masuk: () => masuk('login'), daftar: () => masuk('daftar'), riwayat, tool: () => tool(h[1]), admin }[h[0]] || home)();
 }
 addEventListener('hashchange', route); route();
