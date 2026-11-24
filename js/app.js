@@ -13,7 +13,7 @@ async function api(action, data) {
     return await r.json();
   } catch (e) { return { success: false, message: 'Gagal terhubung ke server: ' + e.message }; }
 }
-function setAuth(t, u) { S.token = t; S.user = u; localStorage.setItem('tok', t); localStorage.setItem('usr', JSON.stringify(u)); top(); }
+function setAuth(t, u) { S.token = t; S.user = u; localStorage.setItem('tok', t); localStorage.setItem('usr', JSON.stringify(u)); renderTop(); }
 
 // ---- Katalog 33 tool: [kategori, id, nama, deskripsi] ----
 const CATS = ['Organize PDF','Optimize PDF','Convert to PDF','Convert from PDF','Edit PDF','PDF Security','PDF Intelligence'];
@@ -34,7 +34,7 @@ const T = [
 const READY = new Set(['merge','split','remove','extract','rotate','jpg2pdf']);
 
 // ---- Mesin PDF di browser (pdf-lib) ----
-const { PDFDocument, degrees } = PDFLib;
+const { PDFDocument, degrees } = window.PDFLib || {};
 const load = async f => PDFDocument.load(await f.arrayBuffer());
 async function pick(doc, idx) { const o = await PDFDocument.create(); (await o.copyPages(doc, idx)).forEach(p => o.addPage(p)); return o; }
 function parse(str, n) {
@@ -54,7 +54,7 @@ const RUN = {
 };
 
 // ---- Tampilan ----
-function top() {
+function renderTop() {
   $('#top').innerHTML = `<a class="logo" href="#/"><b>P</b> PDF CONVERTER</a><nav><a href="#/">Semua Tools</a><a href="#/riwayat">Riwayat</a></nav>
   <div class="who"><span class="chip">${S.user ? esc(S.user.nama) + ' · ' + maxMB() + ' MB' : 'Tamu · maks ' + maxMB() + ' MB'}</span>
   ${S.user ? '<button id="out" class="btn o">Keluar</button>' : '<a class="btn" href="#/masuk">Masuk</a>'}</div>`;
@@ -127,7 +127,7 @@ async function riwayat() {
   $('#h').innerHTML = r.data.length ? `<div class="scroll"><table><thead><tr><th>Waktu</th><th>Tool</th><th>Ukuran</th><th>Status</th></tr></thead><tbody>${r.data.map(j => `<tr><td>${esc(j.waktu)}</td><td>${esc(j.tool_id)}</td><td>${esc(j.ukuran_mb)} MB</td><td><span class="badge ${j.status === 'failed' ? 'bad' : ''}">${esc(j.status)}</span></td></tr>`).join('')}</tbody></table></div>` : '<p>Belum ada riwayat.</p>';
 }
 function route() {
-  const h = location.hash.replace(/^#\/?/, '').split('/'); top(); window.scrollTo(0, 0);
+  const h = location.hash.replace(/^#\/?/, '').split('/'); renderTop(); window.scrollTo(0, 0);
   ({ masuk: () => masuk('login'), daftar: () => masuk('daftar'), riwayat, tool: () => tool(h[1]) }[h[0]] || home)();
 }
 addEventListener('hashchange', route); route();
